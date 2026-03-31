@@ -19,7 +19,7 @@ export GOOGLE_DOC_ID="${GOOGLE_DOC_ID}"
 export GOOGLE_CREDENTIALS_PATH="${HOME}/.google_credentials.json"
 
 # Script and log location
-SCRIPT_DIR="${HOME}/scripts/jira"
+SCRIPT_DIR="${HOME}/PyCharmProjects/jira_standup_updates"
 LOG_FILE="${SCRIPT_DIR}/weekly_update.log"
 
 # Change to script directory
