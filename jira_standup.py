@@ -8,6 +8,8 @@ Env vars:
   JIRA_EMAIL         your Jira email
   JIRA_API_TOKEN     Jira API token
   ANTHROPIC_API_KEY  Claude API key
+  STANDUP_DOC_ID     Google Doc ID for --update-doc
+  GOOGLE_CREDENTIALS_PATH  Path to Google OAuth credentials (default: ~/.google_credentials.json)
 
 Optional:
   JIRA_JQL           override JQL entirely
@@ -16,6 +18,7 @@ Optional:
 import argparse
 import os
 import sys
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import anthropic
@@ -106,11 +109,74 @@ def generate_korean_summary(rows: List[Tuple[str, str, str]]) -> str:
     return message.content[0].text
 
 
+def append_summary_to_google_doc(doc_id: str, summary: str) -> None:
+    """Append today's date as a heading and the summary text to a Google Doc."""
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from googleapiclient.discovery import build
+
+    SCOPES = ["https://www.googleapis.com/auth/documents"]
+    creds_path = os.getenv("GOOGLE_CREDENTIALS_PATH", os.path.expanduser("~/.google_credentials.json"))
+    token_path = os.path.expanduser("~/.google_token.json")
+
+    if not os.path.exists(creds_path):
+        raise FileNotFoundError(f"Google credentials not found: {creds_path}")
+
+    creds = None
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(token_path, "w") as token:
+            token.write(creds.to_json())
+
+    service = build("docs", "v1", credentials=creds)
+
+    doc = service.documents().get(documentId=doc_id).execute()
+    end_index = doc["body"]["content"][-1]["endIndex"] - 1
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    # Insert date heading + summary text, then style the heading
+    insert_text = f"\n{today}\n{summary}\n"
+
+    requests_list = [
+        {
+            "insertText": {
+                "location": {"index": end_index},
+                "text": insert_text,
+            }
+        },
+        {
+            "updateParagraphStyle": {
+                "range": {
+                    "startIndex": end_index + 1,
+                    "endIndex": end_index + 1 + len(today),
+                },
+                "paragraphStyle": {"namedStyleType": "HEADING_3"},
+                "fields": "namedStyleType",
+            }
+        },
+    ]
+
+    service.documents().batchUpdate(
+        documentId=doc_id, body={"requests": requests_list}
+    ).execute()
+
+    print(f"Successfully appended standup to Google Doc: {doc_id}", file=sys.stderr)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate a Korean standup summary from recent Jira activity.")
     parser.add_argument("--project", help='Optional project key filter (e.g., "VV").')
     parser.add_argument("--jql", help="Custom JQL (overrides defaults).")
     parser.add_argument("--days", type=int, default=1, help="Fetch issues updated in the last N days (default: 1).")
+    parser.add_argument("--update-doc", action="store_true", help="Append summary to Google Doc (requires STANDUP_DOC_ID env var).")
     args = parser.parse_args()
 
     base_url = os.getenv("JIRA_BASE_URL", "").rstrip("/")
@@ -152,7 +218,20 @@ def main() -> int:
         return 1
 
     rows = to_rows(issues)
-    print(generate_korean_summary(rows))
+    summary = generate_korean_summary(rows)
+    print(summary)
+
+    if args.update_doc:
+        doc_id = os.getenv("STANDUP_DOC_ID", "").strip()
+        if not doc_id:
+            print("ERROR: --update-doc requires STANDUP_DOC_ID env var\n", file=sys.stderr)
+            return 2
+        try:
+            append_summary_to_google_doc(doc_id, summary)
+        except Exception as e:
+            print(f"ERROR appending to Google Doc: {e}", file=sys.stderr)
+            return 1
+
     return 0
 
 

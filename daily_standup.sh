@@ -10,12 +10,13 @@ export JIRA_EMAIL="${JIRA_ID}"
 export JIRA_API_TOKEN="${JIRA_TOKEN}"
 export JIRA_BASE_URL="${JIRA_BASE_URL:-https://your-org.atlassian.net}"
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}"
+export STANDUP_DOC_ID="${STANDUP_DOC_ID}"
 
 SCRIPT_DIR="${HOME}/PyCharmProjects/jira_standup_updates"
 LOG_FILE="${SCRIPT_DIR}/standup.log"
 
 PYTHON="${VENV_PYTHON:-python3}"
 
-${PYTHON} "${SCRIPT_DIR}/jira_standup.py" | tee -a "${LOG_FILE}"
+${PYTHON} "${SCRIPT_DIR}/jira_standup.py" --update-doc | tee -a "${LOG_FILE}"
 echo "" >> "${LOG_FILE}"
 echo "Standup generated at $(date)" >> "${LOG_FILE}"
