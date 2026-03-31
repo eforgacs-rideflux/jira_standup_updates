@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-Jira Cloud: Fetch issues assigned to the authenticated user, updated in last 7 days,
+Jira Cloud: Fetch issues assigned to the authenticated user, updated in last N days,
 using the NEW endpoint: /rest/api/3/search/jql (legacy /search is removed).
 
 Outputs:
 - Markdown table to stdout
 - CSV file (default: jira_last_week_assigned_to_me.csv)
 - Optional: Append table to Google Doc with --update-doc flag
+- Optional: Standup summary (<=5 sentences) with --standup flag
 
 Env vars:
   JIRA_BASE_URL     e.g. https://rideflux.atlassian.net
   JIRA_EMAIL        e.g. eforgacs@rideflux.com
   JIRA_API_TOKEN    Jira API token
+  ANTHROPIC_API_KEY Claude API key (required for --standup)
   GOOGLE_DOC_ID     Google Doc ID for --update-doc
   GOOGLE_CREDENTIALS_PATH  Path to Google OAuth credentials (default: ~/.google_credentials.json)
 
@@ -38,7 +40,7 @@ def build_jql(args: argparse.Namespace) -> str:
         parts.append(f'project = "{args.project}"')
 
     parts.append("assignee = currentUser()")
-    parts.append("updated >= -7d")
+    parts.append(f"updated >= -{args.days}d")
     return " AND ".join(parts) + " ORDER BY updated DESC"
 
 
@@ -317,14 +319,48 @@ def append_to_google_doc(
     print(f"Successfully appended table to Google Doc: {doc_id}", file=sys.stderr)
 
 
+def generate_standup_summary(rows: List[Tuple[str, str, str, str, str]]) -> str:
+    """
+    Use Claude API to generate a standup-ready summary (<=5 sentences).
+    """
+    import anthropic
+
+    if not rows:
+        return "No Jira tickets were updated in the past day."
+
+    ticket_lines = "\n".join(
+        f"- {key}: {title} [{status}]" for key, title, status, _, _ in rows
+    )
+    prompt = (
+        "You are helping an engineer prepare a daily standup update. "
+        "Given the following Jira tickets they worked on, write a concise summary "
+        "of at most 5 sentences suitable for a standup meeting. "
+        "Focus on what was accomplished and any tickets that moved to done/review.\n\n"
+        f"Tickets:\n{ticket_lines}"
+    )
+
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=300,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", help='Optional project key filter (e.g., "VV" or "IS").')
     parser.add_argument("--jql", help="Custom JQL (overrides defaults).")
+    parser.add_argument("--days", type=int, default=7, help="Fetch issues updated in the last N days (default: 7).")
+    parser.add_argument("--standup", action="store_true", help="Print a <=5 sentence standup summary using Claude (implies --days 1 if not set).")
     parser.add_argument("--csv", default="jira_last_week_assigned_to_me.csv", help="CSV output path.")
     parser.add_argument("--page-size", type=int, default=100, help="Results per page (maxResults).")
     parser.add_argument("--update-doc", action="store_true", help="Append table to Google Doc (requires GOOGLE_DOC_ID env var).")
     args = parser.parse_args()
+
+    if args.standup and args.days == 7:
+        args.days = 1
 
     base_url = os.getenv("JIRA_BASE_URL", "").rstrip("/")
     # Ensure base_url has a scheme
@@ -361,6 +397,11 @@ def main() -> int:
         return 1
 
     rows = to_rows(issues)
+
+    if args.standup:
+        print(generate_standup_summary(rows))
+        return 0
+
     print_markdown_table(rows)
     write_csv(rows, args.csv)
     print(f"\nJQL used: {jql}\nWrote CSV: {args.csv}", file=sys.stderr)
