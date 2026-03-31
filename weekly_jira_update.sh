@@ -11,10 +11,11 @@ fi
 # Map from user's existing env vars to what the script expects
 export JIRA_EMAIL="${JIRA_ID}"
 export JIRA_API_TOKEN="${JIRA_TOKEN}"
-export JIRA_BASE_URL="https://rideflux.atlassian.net"
+export JIRA_BASE_URL="${JIRA_BASE_URL:-https://your-org.atlassian.net}"
 
 # Google Docs configuration
-export GOOGLE_DOC_ID="16cg_ZFGwEROpR4cSI4nvDuvXxaY4UNV53p2ygdvcDfM"
+# Set GOOGLE_DOC_ID in ~/.jira_env
+export GOOGLE_DOC_ID="${GOOGLE_DOC_ID}"
 export GOOGLE_CREDENTIALS_PATH="${HOME}/.google_credentials.json"
 
 # Script and log location
@@ -24,12 +25,8 @@ LOG_FILE="${SCRIPT_DIR}/weekly_update.log"
 # Change to script directory
 cd "${SCRIPT_DIR}"
 
-# Check if venv exists, if not use system python3
-if [ -f /home/eddie/PyCharmProjects/RideFluxSW/.venv/bin/python ]; then
-    PYTHON="/home/eddie/PyCharmProjects/RideFluxSW/.venv/bin/python"
-else
-    PYTHON="python3"
-fi
+# Use VENV_PYTHON env var if set, otherwise fall back to system python3
+PYTHON="${VENV_PYTHON:-python3}"
 
 # Run the script
 ${PYTHON} "${SCRIPT_DIR}/jira_last_week.py" --update-doc >> "${LOG_FILE}" 2>&1
