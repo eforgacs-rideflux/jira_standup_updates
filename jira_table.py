@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
 """
 Jira Cloud: Fetch issues assigned to the authenticated user, updated in last N days,
-using the NEW endpoint: /rest/api/3/search/jql (legacy /search is removed).
-
-Outputs:
-- Markdown table to stdout
-- CSV file (default: jira_last_week_assigned_to_me.csv)
-- Optional: Append table to Google Doc with --update-doc flag
-- Optional: Standup summary (<=5 sentences) with --standup flag
+and output a markdown table + CSV, with optional Google Doc append.
 
 Env vars:
-  JIRA_BASE_URL     e.g. https://rideflux.atlassian.net
-  JIRA_EMAIL        e.g. eforgacs@rideflux.com
+  JIRA_BASE_URL     e.g. https://your-org.atlassian.net
+  JIRA_EMAIL        your Jira email
   JIRA_API_TOKEN    Jira API token
-  ANTHROPIC_API_KEY Claude API key (required for --standup)
   GOOGLE_DOC_ID     Google Doc ID for --update-doc
   GOOGLE_CREDENTIALS_PATH  Path to Google OAuth credentials (default: ~/.google_credentials.json)
 
@@ -51,9 +44,7 @@ def jira_search_jql(
     fields: List[str],
     page_size: int = 100,
 ) -> List[Dict]:
-    """
-    Uses POST /rest/api/3/search/jql with nextPageToken pagination.
-    """
+    """Uses POST /rest/api/3/search/jql with nextPageToken pagination."""
     endpoint = f"{base_url}/rest/api/3/search/jql"
     issues: List[Dict] = []
     next_token: Optional[str] = None
@@ -75,9 +66,7 @@ def jira_search_jql(
         batch = data.get("issues") or []
         issues.extend(batch)
 
-        # Jira Cloud pagination for this endpoint uses nextPageToken
         next_token = data.get("nextPageToken")
-
         if not next_token or not batch:
             break
 
@@ -91,7 +80,6 @@ def to_rows(issues: List[Dict]) -> List[Tuple[str, str, str, str, str]]:
         f = it.get("fields") or {}
         summary = (f.get("summary") or "").replace("\n", " ").strip()
         status = ((f.get("status") or {}) or {}).get("name", "")
-        # Extract date from ISO timestamp (e.g., "2026-01-08T12:34:56.000+0000" -> "2026-01-08")
         created = (f.get("created") or "")[:10]
         updated = (f.get("updated") or "")[:10]
         rows.append((key, summary, status, created, updated))
@@ -140,11 +128,9 @@ def get_google_docs_service():
         raise FileNotFoundError(f"Credentials not found: {creds_path}")
 
     creds = None
-    # Load cached token if it exists
     if os.path.exists(token_path):
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)
 
-    # If no valid credentials, authenticate
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
@@ -152,7 +138,6 @@ def get_google_docs_service():
             flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
             creds = flow.run_local_server(port=0)
 
-        # Save the credentials for the next run
         with open(token_path, "w") as token:
             token.write(creds.to_json())
 
@@ -162,20 +147,15 @@ def get_google_docs_service():
 def append_to_google_doc(
     doc_id: str, rows: List[Tuple[str, str, str, str, str]]
 ) -> None:
-    """
-    Append a table with today's date to the specified Google Doc.
-    """
+    """Append a table with today's date to the specified Google Doc."""
     service = get_google_docs_service()
 
-    # Get current document to find end index
     doc = service.documents().get(documentId=doc_id).execute()
     content = doc.get("body").get("content")
     end_index = content[-1].get("endIndex") - 1
 
-    # Build requests to insert content
     requests_list: List[Dict[str, Any]] = []
 
-    # Insert heading with today's date
     today = datetime.now().strftime("%Y-%m-%d")
     heading_text = f"\n{today}\n"
 
@@ -188,7 +168,6 @@ def append_to_google_doc(
         }
     )
 
-    # Update paragraph style for the date heading
     requests_list.append(
         {
             "updateParagraphStyle": {
@@ -204,10 +183,8 @@ def append_to_google_doc(
         }
     )
 
-    # Calculate new end index after heading
     table_start_index = end_index + len(heading_text)
 
-    # Insert table
     num_rows = len(rows) + 1  # +1 for header
     num_columns = 5
 
@@ -221,16 +198,11 @@ def append_to_google_doc(
         }
     )
 
-    # Execute the batch update
     service.documents().batchUpdate(
         documentId=doc_id, body={"requests": requests_list}
     ).execute()
 
-    # Now populate the table cells
-    # Re-fetch the document to get the table structure
     doc = service.documents().get(documentId=doc_id).execute()
-
-    # Find the table we just inserted
     content = doc.get("body").get("content")
     table = None
     for element in content:
@@ -244,9 +216,6 @@ def append_to_google_doc(
         print("WARNING: Could not find inserted table to populate", file=sys.stderr)
         return
 
-    # Populate table cells
-    # Build list of (index, text, is_header) tuples, then sort by index descending
-    # This ensures we insert from end to beginning, avoiding index shifting issues
     cell_data: List[Tuple[int, str, bool]] = []
     headers = ["Ticket", "Title", "Status", "Created", "Last Updated"]
     all_rows = [headers] + list(rows)
@@ -266,7 +235,6 @@ def append_to_google_doc(
             if not cell_content:
                 continue
 
-            # Get the start index of the paragraph inside the cell
             paragraph = cell_content[0]
             if "paragraph" not in paragraph:
                 continue
@@ -281,10 +249,8 @@ def append_to_google_doc(
 
             cell_data.append((insert_index, text, is_header))
 
-    # Sort by index in descending order (insert from end to beginning)
     cell_data.sort(key=lambda x: x[0], reverse=True)
 
-    # Build requests in reverse order
     populate_requests: List[Dict[str, Any]] = []
     for insert_index, text, is_header in cell_data:
         populate_requests.append(
@@ -296,7 +262,6 @@ def append_to_google_doc(
             }
         )
 
-        # Make header row bold
         if is_header:
             populate_requests.append(
                 {
@@ -319,51 +284,17 @@ def append_to_google_doc(
     print(f"Successfully appended table to Google Doc: {doc_id}", file=sys.stderr)
 
 
-def generate_standup_summary(rows: List[Tuple[str, str, str, str, str]]) -> str:
-    """
-    Use Claude API to generate a standup-ready summary (<=5 sentences).
-    """
-    import anthropic
-
-    if not rows:
-        return "No Jira tickets were updated in the past day."
-
-    ticket_lines = "\n".join(
-        f"- {key}: {title} [{status}]" for key, title, status, _, _ in rows
-    )
-    prompt = (
-        "You are helping an engineer prepare a daily standup update. "
-        "Given the following Jira tickets they worked on, write a concise summary "
-        "of at most 5 sentences suitable for a standup meeting. "
-        "Focus on what was accomplished and any tickets that moved to done/review.\n\n"
-        f"Tickets:\n{ticket_lines}"
-    )
-
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=300,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--project", help='Optional project key filter (e.g., "VV" or "IS").')
+    parser = argparse.ArgumentParser(description="Fetch Jira tickets and output a markdown table.")
+    parser.add_argument("--project", help='Optional project key filter (e.g., "VV").')
     parser.add_argument("--jql", help="Custom JQL (overrides defaults).")
     parser.add_argument("--days", type=int, default=7, help="Fetch issues updated in the last N days (default: 7).")
-    parser.add_argument("--standup", action="store_true", help="Print a <=5 sentence standup summary using Claude (implies --days 1 if not set).")
-    parser.add_argument("--csv", default="jira_last_week_assigned_to_me.csv", help="CSV output path.")
-    parser.add_argument("--page-size", type=int, default=100, help="Results per page (maxResults).")
+    parser.add_argument("--csv", default="jira_table.csv", help="CSV output path.")
+    parser.add_argument("--page-size", type=int, default=100, help="Results per page.")
     parser.add_argument("--update-doc", action="store_true", help="Append table to Google Doc (requires GOOGLE_DOC_ID env var).")
     args = parser.parse_args()
 
-    if args.standup and args.days == 7:
-        args.days = 1
-
     base_url = os.getenv("JIRA_BASE_URL", "").rstrip("/")
-    # Ensure base_url has a scheme
     if base_url and not base_url.startswith(("http://", "https://")):
         base_url = f"https://{base_url}"
 
@@ -397,11 +328,6 @@ def main() -> int:
         return 1
 
     rows = to_rows(issues)
-
-    if args.standup:
-        print(generate_standup_summary(rows))
-        return 0
-
     print_markdown_table(rows)
     write_csv(rows, args.csv)
     print(f"\nJQL used: {jql}\nWrote CSV: {args.csv}", file=sys.stderr)

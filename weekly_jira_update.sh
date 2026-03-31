@@ -29,7 +29,7 @@ cd "${SCRIPT_DIR}"
 PYTHON="${VENV_PYTHON:-python3}"
 
 # Run the script
-${PYTHON} "${SCRIPT_DIR}/jira_last_week.py" --update-doc >> "${LOG_FILE}" 2>&1
+${PYTHON} "${SCRIPT_DIR}/jira_table.py" --update-doc >> "${LOG_FILE}" 2>&1
 
 # Log completion
 echo "Update completed at $(date)" >> "${LOG_FILE}"
