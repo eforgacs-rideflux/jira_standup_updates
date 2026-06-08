@@ -17,6 +17,12 @@ LOG_FILE="${SCRIPT_DIR}/standup.log"
 
 PYTHON="${VENV_PYTHON:-python3}"
 
+# Skip Korean public holidays
+if ${PYTHON} -c "import holidays, datetime; exit(0 if datetime.date.today() in holidays.KR() else 1)"; then
+    echo "Skipping standup: today is a Korean public holiday." | tee -a "${LOG_FILE}"
+    exit 0
+fi
+
 ${PYTHON} "${SCRIPT_DIR}/jira_standup.py" --update-doc | tee -a "${LOG_FILE}"
 echo "" >> "${LOG_FILE}"
 echo "Standup generated at $(date)" >> "${LOG_FILE}"
