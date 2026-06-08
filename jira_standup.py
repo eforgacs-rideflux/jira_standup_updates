@@ -94,16 +94,24 @@ def generate_korean_summary(rows: List[Tuple[str, str, str]]) -> str:
     )
     prompt = (
         "당신은 개발팀의 데일리 스탠드업 미팅을 도와주는 어시스턴트입니다. "
-        "아래 Jira 티켓 목록을 바탕으로 스탠드업에서 발표할 수 있는 간결한 업무 요약을 "
-        "한국어로 작성해주세요. 최대 5문장으로 작성하고, 완료된 작업과 진행 중인 작업을 "
+        "아래 Jira 티켓 목록을 바탕으로 두 가지 형식의 요약을 한국어로 작성해주세요.\n\n"
+        "1) 먼저 '## 데일리 스탠드업 업무 요약' 제목 아래에 스탠드업에서 발표할 수 있는 "
+        "간결한 업무 요약을 최대 5문장으로 작성해주세요. 완료된 작업과 진행 중인 작업을 "
         "중심으로 설명해주세요.\n\n"
+        "2) 그 다음 '## 불렛 포인트 요약' 제목 아래에 팀 리더가 회의록에 기록할 수 있는 "
+        "간단한 불렛 포인트 목록을 작성해주세요. 각 항목은 한 줄로 간결하게 작성하고, "
+        "완료된 작업은 '~완료'를, 진행 중인 작업은 '~중' 또는 '~예정'을 붙여주세요.\n\n"
+        "불렛 포인트 예시:\n"
+        "- RideFluxSW_simulation_odin_noetic 에서 foxy 빌드 추가\n"
+        "- x86 릴리즈 및 커스텀 빌드 git clone 실패 원인 파악 후 조치\n"
+        "- map_ros2_converter 잡 빌드 실패 시 PR에 댓글 알림 및 상태 변경이 안 되는 문제 확인 예정\n\n"
         f"티켓 목록:\n{ticket_lines}"
     )
 
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=300,
+        max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
     return message.content[0].text
