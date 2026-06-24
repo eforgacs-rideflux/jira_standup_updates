@@ -23,6 +23,13 @@ if ${PYTHON} -c "import holidays, datetime; exit(0 if datetime.date.today() in h
     exit 0
 fi
 
-${PYTHON} "${SCRIPT_DIR}/jira_standup.py" --update-doc | tee -a "${LOG_FILE}"
+# On Wednesdays, recap the past week
+if [ "$(date +%u)" -eq 3 ]; then
+    DAYS_ARG="--days 7"
+else
+    DAYS_ARG=""
+fi
+
+${PYTHON} "${SCRIPT_DIR}/jira_standup.py" --update-doc ${DAYS_ARG} | tee -a "${LOG_FILE}"
 echo "" >> "${LOG_FILE}"
 echo "Standup generated at $(date)" >> "${LOG_FILE}"
