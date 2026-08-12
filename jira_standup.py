@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
 Fetch Jira tickets assigned to the current user updated in the last N days
-and generate a Korean natural language standup summary via Claude.
+and print them as a plain list for use in standup generation.
 
 Env vars:
   JIRA_BASE_URL      e.g. https://your-org.atlassian.net
   JIRA_EMAIL         your Jira email
   JIRA_API_TOKEN     Jira API token
-  ANTHROPIC_API_KEY  Claude API key
-  STANDUP_DOC_ID     Google Doc ID for --update-doc
-  GOOGLE_CREDENTIALS_PATH  Path to Google OAuth credentials (default: ~/.google_credentials.json)
 
 Optional:
   JIRA_JQL           override JQL entirely
@@ -18,10 +15,8 @@ Optional:
 import argparse
 import os
 import sys
-from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-import anthropic
 import requests
 
 
@@ -85,106 +80,11 @@ def to_rows(issues: List[Dict]) -> List[Tuple[str, str, str]]:
     return rows
 
 
-def generate_korean_summary(rows: List[Tuple[str, str, str]]) -> str:
-    if not rows:
-        return "오늘 업데이트된 Jira 티켓이 없습니다."
-
-    ticket_lines = "\n".join(
-        f"- {key}: {title} [{status}]" for key, title, status in rows
-    )
-    prompt = (
-        "당신은 개발팀의 데일리 스탠드업 미팅을 도와주는 어시스턴트입니다. "
-        "아래 Jira 티켓 목록을 바탕으로 두 가지 형식의 요약을 한국어로 작성해주세요.\n\n"
-        "1) 먼저 '## 데일리 스탠드업 업무 요약' 제목 아래에 스탠드업에서 발표할 수 있는 "
-        "간결한 업무 요약을 최대 5문장으로 작성해주세요. 완료된 작업과 진행 중인 작업을 "
-        "중심으로 설명해주세요.\n\n"
-        "2) 그 다음 '## 불렛 포인트 요약' 제목 아래에 팀 리더가 회의록에 기록할 수 있는 "
-        "간단한 불렛 포인트 목록을 작성해주세요. 각 항목은 한 줄로 간결하게 작성하고, "
-        "완료된 작업은 '~완료'를, 진행 중인 작업은 '~중' 또는 '~예정'을 붙여주세요.\n\n"
-        "불렛 포인트 예시:\n"
-        "- RideFluxSW_simulation_odin_noetic 에서 foxy 빌드 추가\n"
-        "- x86 릴리즈 및 커스텀 빌드 git clone 실패 원인 파악 후 조치\n"
-        "- map_ros2_converter 잡 빌드 실패 시 PR에 댓글 알림 및 상태 변경이 안 되는 문제 확인 예정\n\n"
-        f"티켓 목록:\n{ticket_lines}"
-    )
-
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
-
-
-def append_summary_to_google_doc(doc_id: str, summary: str) -> None:
-    """Append today's date as a heading and the summary text to a Google Doc."""
-    from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from googleapiclient.discovery import build
-
-    SCOPES = ["https://www.googleapis.com/auth/documents"]
-    creds_path = os.getenv("GOOGLE_CREDENTIALS_PATH", os.path.expanduser("~/.google_credentials.json"))
-    token_path = os.path.expanduser("~/.google_token.json")
-
-    if not os.path.exists(creds_path):
-        raise FileNotFoundError(f"Google credentials not found: {creds_path}")
-
-    creds = None
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(token_path, "w") as token:
-            token.write(creds.to_json())
-
-    service = build("docs", "v1", credentials=creds)
-
-    doc = service.documents().get(documentId=doc_id).execute()
-    end_index = doc["body"]["content"][-1]["endIndex"] - 1
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    # Insert date heading + summary text, then style the heading
-    insert_text = f"\n{today}\n{summary}\n"
-
-    requests_list = [
-        {
-            "insertText": {
-                "location": {"index": end_index},
-                "text": insert_text,
-            }
-        },
-        {
-            "updateParagraphStyle": {
-                "range": {
-                    "startIndex": end_index + 1,
-                    "endIndex": end_index + 1 + len(today),
-                },
-                "paragraphStyle": {"namedStyleType": "HEADING_3"},
-                "fields": "namedStyleType",
-            }
-        },
-    ]
-
-    service.documents().batchUpdate(
-        documentId=doc_id, body={"requests": requests_list}
-    ).execute()
-
-    print(f"Successfully appended standup to Google Doc: {doc_id}", file=sys.stderr)
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate a Korean standup summary from recent Jira activity.")
+    parser = argparse.ArgumentParser(description="List recent Jira activity for standup preparation.")
     parser.add_argument("--project", help='Optional project key filter (e.g., "VV").')
     parser.add_argument("--jql", help="Custom JQL (overrides defaults).")
     parser.add_argument("--days", type=int, default=1, help="Fetch issues updated in the last N days (default: 1).")
-    parser.add_argument("--update-doc", action="store_true", help="Append summary to Google Doc (requires STANDUP_DOC_ID env var).")
     args = parser.parse_args()
 
     base_url = os.getenv("JIRA_BASE_URL", "").rstrip("/")
@@ -193,7 +93,6 @@ def main() -> int:
 
     email = os.getenv("JIRA_EMAIL", "")
     token = os.getenv("JIRA_API_TOKEN", "")
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
 
     if not base_url or not email or not token:
         print(
@@ -201,10 +100,6 @@ def main() -> int:
             "  JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN\n",
             file=sys.stderr,
         )
-        return 2
-
-    if not api_key:
-        print("Missing env var: ANTHROPIC_API_KEY\n", file=sys.stderr)
         return 2
 
     jql = os.getenv("JIRA_JQL") or build_jql(args)
@@ -226,19 +121,13 @@ def main() -> int:
         return 1
 
     rows = to_rows(issues)
-    summary = generate_korean_summary(rows)
-    print(summary)
 
-    if args.update_doc:
-        doc_id = os.getenv("STANDUP_DOC_ID", "").strip()
-        if not doc_id:
-            print("ERROR: --update-doc requires STANDUP_DOC_ID env var\n", file=sys.stderr)
-            return 2
-        try:
-            append_summary_to_google_doc(doc_id, summary)
-        except Exception as e:
-            print(f"ERROR appending to Google Doc: {e}", file=sys.stderr)
-            return 1
+    if not rows:
+        print("No Jira tickets updated in the specified period.")
+        return 0
+
+    for key, summary, status in rows:
+        print(f"- {key}: {summary} [{status}]")
 
     return 0
 
