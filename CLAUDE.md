@@ -80,15 +80,18 @@ Every update has two parts, always printed in this order:
 
 ### 1. Bullet list
 
-One line per Jira ticket, **sorted by status**, in this format:
+One line per Jira ticket, **grouped by topic/theme**, in this format:
 
 ```
 - KEY: summary [STATUS]
 ```
 
-Group/sort by status (e.g. all `IN PROGRESS` together, then `DONE`, then `Selected for
-Development`, etc.) rather than raw `updated` order. This is the same raw-ish list
-`jira_standup.py` prints — just sorted by status instead of by updated date.
+Group by theme/project area (e.g. Jenkins infra, SAD CR automation, GitHub/Slack
+notification work, RTV bugs, docs, etc.) rather than raw `updated` order or status. This
+applies to every day's bullet list, daily or weekly — not just the Wednesday recap. Within
+each topic group, list tickets in whatever order reads naturally (e.g. status or recency);
+there's no required sub-sort. This is the same raw-ish list `jira_standup.py` prints —
+just grouped by topic instead of by updated date.
 
 ### 2. Spoken update (Korean, then English translation)
 
