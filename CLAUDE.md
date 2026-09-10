@@ -100,6 +100,8 @@ After the bullet list, print the natural-language spoken version:
 - **Korean version first** — this is what actually gets read aloud / posted to Notion.
 - **English translation second** — for the user's own review only, not what gets
   posted/spoken.
+- **Do not mention Jira ticket numbers** (e.g. VV-3114) anywhere in the spoken update —
+  describe the work in plain language only.
 
 ## Daily format (Mon/Tue/Thu)
 
