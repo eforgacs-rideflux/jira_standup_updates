@@ -25,8 +25,8 @@ LOG_FILE="${SCRIPT_DIR}/weekly_update.log"
 # Change to script directory
 cd "${SCRIPT_DIR}"
 
-# Use VENV_PYTHON env var if set, otherwise fall back to system python3
-PYTHON="${VENV_PYTHON:-python3}"
+# Use VENV_PYTHON env var if set, otherwise fall back to the project venv
+PYTHON="${VENV_PYTHON:-${SCRIPT_DIR}/.venv/bin/python}"
 
 # Run the script
 ${PYTHON} "${SCRIPT_DIR}/jira_table.py" --update-doc >> "${LOG_FILE}" 2>&1

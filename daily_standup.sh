@@ -15,7 +15,7 @@ export STANDUP_DOC_ID="${STANDUP_DOC_ID}"
 SCRIPT_DIR="${HOME}/PyCharmProjects/jira_standup_updates"
 LOG_FILE="${SCRIPT_DIR}/standup.log"
 
-PYTHON="${VENV_PYTHON:-python3}"
+PYTHON="${VENV_PYTHON:-${SCRIPT_DIR}/.venv/bin/python}"
 
 # Skip Korean public holidays
 if ${PYTHON} -c "import holidays, datetime; exit(0 if datetime.date.today() in holidays.KR() else 1)"; then
