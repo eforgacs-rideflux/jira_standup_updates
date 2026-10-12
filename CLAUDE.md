@@ -22,6 +22,27 @@ depending on the day of the week — always check which one applies before gener
   today's weekday, don't ask the user for the meeting time — compute the previous
   meeting date and use `YYYY-MM-DD 13:50` directly in the JQL.
 
+### Holidays and days off
+
+- **Korean public holidays cancel the meeting.** When walking back to the previous
+  meeting day, skip any date that is a KR public holiday and keep going to the meeting
+  day before it (e.g. if Thursday is a holiday, Monday's update covers since Tuesday
+  1:50 PM KST). Check with the project venv (uses the `holidays` package):
+
+  ```bash
+  .venv/bin/python -c "import holidays, datetime; print(holidays.KR().get(datetime.date(YYYY, M, D)))"
+  ```
+
+  Prints the holiday name, or `None` if it's a normal day. This also covers
+  substitute holidays (대체공휴일).
+- If **today** is a KR public holiday, there's no meeting — mention that to the user
+  before generating anything.
+- The user may also mention team/company days off that aren't public holidays (e.g.
+  "we had off on Friday"). Treat those the same way: skip them as meeting days for the
+  cutoff calculation. A day off on a non-standup day (Friday) doesn't change the cutoff.
+- Run the Jira scripts with `.venv/bin/python`, not the system `python3` (which lacks
+  `requests`/`holidays`).
+
 ## Cross-reference with GitHub PRs (source of truth for completion)
 
 Jira status can lag behind reality (a ticket left "Selected for Development" or "IN
@@ -62,7 +83,7 @@ export JIRA_EMAIL="${JIRA_ID}"
 export JIRA_API_TOKEN="${JIRA_TOKEN}"
 export JIRA_BASE_URL="https://rideflux.atlassian.net"
 export JIRA_JQL='assignee = currentUser() AND updated >= "YYYY-MM-DD HH:MM" ORDER BY updated DESC'
-python3 jira_standup.py
+.venv/bin/python jira_standup.py
 ```
 
 - The cutoff is always **1:50 PM KST** on the previous meeting day (see Schedule above
