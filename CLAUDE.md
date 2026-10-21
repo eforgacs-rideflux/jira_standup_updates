@@ -60,8 +60,10 @@ gh search prs --author=eforgacs-rideflux --owner=RideFlux --sort=updated \
   `mergedAt`/use `gh pr view <n> --json state,mergedAt` if ambiguous from search
   results).
 - If a PR for a ticket is `merged` but Jira still shows it as open/in-progress, treat the
-  ticket as **done** in the bullet list and note the discrepancy so the user can update
-  Jira.
+  ticket as **done** in the bullet list — the merged PR is the source of truth. This lag
+  is expected: a Jira automation moves tickets to Done when a release happens, so merged
+  tickets sit in `IN PROGRESS` until the next release. Don't flag these as discrepancies
+  or ask the user to update Jira manually.
 - If a PR is still `open`, keep the ticket's Jira status (e.g. `IN PROGRESS`) as-is —
   don't downgrade based on GitHub alone.
 - If a PR was **closed without merging**, don't assume it's a blocker or that work
