@@ -22,6 +22,29 @@ depending on the day of the week — always check which one applies before gener
   today's weekday, don't ask the user for the meeting time — compute the previous
   meeting date and use `YYYY-MM-DD 13:50` directly in the JQL.
 
+### Thursday: don't rehash what Wednesday's weekly already covered
+
+Thursday's JQL window still starts at Tuesday 1:50 PM KST. That window overlaps with the
+Wednesday weekly, so anything already reported there shouldn't be repeated on Thursday.
+
+1. Read the user's Wednesday entry on the Notion page **VVSW 주간회의**
+   (https://app.notion.com/p/rideflux/VVSW-26a7b7808474800e8e2be31f02399d2a).
+   - The page is huge (300k+ chars), so `notion-fetch` dumps it to a file. Read the
+     file with Python or grep rather than with the Read tool.
+   - Entries are arranged by date, oldest first. Each week is an h3 toggle like
+     `10월 5주차 (10/28)`; the date in parentheses is that Wednesday. Inside the week
+     toggle, each person has their own toggle (the user's is `에디`). That toggle holds
+     the same `KEY: summary [STATUS]` bullet list that this repo generates.
+2. Remove a ticket from Thursday's update (bullet list and spoken update) if it appears
+   in that Wednesday entry and **nothing has changed since**: same status, and no newly
+   merged or opened PR after Wednesday 1:50 PM KST.
+3. Keep a ticket if it moved forward after Wednesday's meeting (e.g. `IN PROGRESS` on
+   Wednesday but its PR merged since). Report only the new progress, not the background
+   that Wednesday already gave.
+4. Tickets that aren't in Wednesday's entry at all are reported as usual.
+5. If there's no Wednesday entry (holiday, day off, or the user skipped it), skip this
+   step and report the full Tuesday-onward window.
+
 ### Holidays and days off
 
 - **Korean public holidays cancel the meeting.** When walking back to the previous
