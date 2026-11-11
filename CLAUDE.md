@@ -6,6 +6,9 @@ depending on the day of the week — always check which one applies before gener
 ## Schedule
 
 - Meetings are always at **1:50 PM KST**, every weekday (Mon-Fri).
+- Only the Wednesday weekly (`[제당밋] VVSW 스탠딩`) is on Google Calendar. The
+  Mon/Tue/Thu dailies still happen even though they aren't on the calendar, so don't
+  conclude a VVSW meeting is cancelled just because the calendar has no event for it.
 - **Monday, Tuesday, Thursday**: short-form daily update.
 - **Wednesday**: weekly recap (covers the full week since last Wednesday's meeting).
 - **Friday**: not a standup day (no meeting-format entry above covers it, per the
