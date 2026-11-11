@@ -66,6 +66,25 @@ Wednesday weekly, so anything already reported there shouldn't be repeated on Th
 - Run the Jira scripts with `.venv/bin/python`, not the system `python3` (which lacks
   `requests`/`holidays`).
 
+## VVSW vs. VVP: keep the two standups separate
+
+The user attends two standups: this VVSW one (the format in this file) and the VVP daily
+(Slack huddle thread format; see the `vvp-daily-standup` memory). **VVSW updates —
+daily, weekly, and the Notion entry — exclude VVP work entirely**; VVP work is reported
+only in the VVP daily. Jira has no reliable label/component for this, so classify each
+ticket by these signals, in order:
+
+1. **PR repo**: any PR for the ticket is in `RideFlux/RFVVPlatform` → VVP.
+2. **Ticket metadata** (for tickets without a PR yet): summary contains `[RF-VVP]` or
+   `VVP`, or parent is a VVP epic/story (e.g. VV-2982 `[RF-VVP] 피드백 대응`, VV-3453
+   observability) → VVP.
+3. Everything else (RideFluxSW CI/merge pipeline, rf_jenkinsfile, rideflux-ci,
+   RideFluxK8S, LogManagement, etc.) → VVSW.
+
+If a ticket is genuinely ambiguous (e.g. touches both, or a VVP-adjacent infra change in
+a non-VVP repo), ask the user instead of guessing. Run the same Jira/`gh` queries for
+both standups and just filter; for a VVP update, the inverse filter applies.
+
 ## Cross-reference with GitHub PRs (source of truth for completion)
 
 Jira status can lag behind reality (a ticket left "Selected for Development" or "IN
