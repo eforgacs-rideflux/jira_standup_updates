@@ -201,7 +201,13 @@ instead of having the user copy-paste it:
   `replace_content` — the page is huge). Contents: first line `에디`, then the
   topic-grouped bullet list only, formatted like previous weeks — a plain topic-label
   line, blank line, then `- KEY: summary [STATUS]` bullets, with Notion markdown escapes
-  (`\_`, `\[`, `\]`, `\*`).
+  (`\_`, `\[`, `\]`, `\*`). Wrap filenames that look like domains (`foo.launch.py`,
+  `librf_rti.so`) in backticks, or Notion auto-links them (which also breaks later
+  `old_str` matches).
+- Tickets/PRs keep moving right up to the meeting. If the user asks for a refresh, re-run
+  the Jira + `gh` queries and patch only the changed lines with targeted
+  `update_content` (include the next bullet's key in `old_str` — last week's entry often
+  has identical lines).
 - Don't post the spoken update (Korean/English) — that stays in the terminal for the
   user to read aloud.
 - Leave any other blocks in the week toggle (e.g. teammates' empty placeholder
