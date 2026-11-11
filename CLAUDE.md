@@ -183,5 +183,26 @@ The spoken portion is structured in Korean around these three sections:
 
 ## Publishing
 
-Don't push anything to Notion, Slack, or Google Docs automatically — this is a content
-generation aid only, unless the user explicitly asks to publish somewhere.
+Don't push anything to Slack or Google Docs automatically — this is a content generation
+aid only, unless the user explicitly asks to publish somewhere.
+
+**Exception: Wednesday weekly → Notion.** On Wednesdays, after generating the update,
+add the user's entry to the Notion page **VVSW 주간회의**
+(https://app.notion.com/p/rideflux/VVSW-26a7b7808474800e8e2be31f02399d2a) directly
+instead of having the user copy-paste it:
+
+- Find this week's h3 toggle (`11월 2주차 (11/11)` style, newest at the bottom of the
+  page — see the Thursday section above for how to read the huge fetch dump). Other
+  teammates usually create it before the meeting; if it doesn't exist yet, ask the user
+  rather than creating the week heading yourself.
+- If an `에디` toggle already exists in that week, ask before overwriting it.
+- Otherwise insert a new toggle inside the week toggle with `notion-update-page`
+  `update_content` (anchor `old_str` on the end of the previous person's toggle, not
+  `replace_content` — the page is huge). Contents: first line `에디`, then the
+  topic-grouped bullet list only, formatted like previous weeks — a plain topic-label
+  line, blank line, then `- KEY: summary [STATUS]` bullets, with Notion markdown escapes
+  (`\_`, `\[`, `\]`, `\*`).
+- Don't post the spoken update (Korean/English) — that stays in the terminal for the
+  user to read aloud.
+- Leave any other blocks in the week toggle (e.g. teammates' empty placeholder
+  `<toggle></toggle>`) untouched.
