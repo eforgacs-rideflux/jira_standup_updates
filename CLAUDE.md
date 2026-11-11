@@ -85,6 +85,37 @@ If a ticket is genuinely ambiguous (e.g. touches both, or a VVP-adjacent infra c
 a non-VVP repo), ask the user instead of guessing. Run the same Jira/`gh` queries for
 both standups and just filter; for a VVP update, the inverse filter applies.
 
+### VVP daily schedule
+
+`[허들] RFVVPlatform 데일리` — Slack huddle in #o프로젝트_내부_vv_platform
+(`C083K70R2GJ`), **every weekday including Friday**:
+
+| Day     | Meeting (KST) | Slackbot reminder |
+|---------|---------------|-------------------|
+| Monday  | 13:30         | 13:25             |
+| Tue–Fri | 11:00         | 10:55             |
+
+- 5 minutes before, Slackbot posts `Reminder: @<group> 5분 뒤에 허들에서 데일리하겠습니다
+  진행상황 쓰레드에 적어주세요`. Each person replies **in that reminder's thread**. To find
+  it, read the channel around the reminder time (`slack_read_channel` with
+  `oldest`/`latest`) and take the Slackbot reminder's `ts`. Afterwards 종우님 usually
+  reposts everyone's lines as one combined top-level message. Don't treat that as the
+  place to post.
+- The cutoff is the **previous VVP meeting's start time**: Monday covers since Friday
+  11:00, Tuesday since Monday 13:30, Wed–Fri since the previous day 11:00. Skip KR
+  holidays and days off the same way as the VVSW schedule.
+- Format: see the `vvp-daily-standup` memory (terse Korean lines in Slack thread style).
+  Offer it as an unsent draft reply in the reminder thread
+  (`slack_send_message_draft` with `thread_ts`). Don't post it directly.
+
+### Which meeting does "update" mean?
+
+If the user asks for an update without naming the meeting, use the **next upcoming
+meeting** based on the current KST time: VVP before 11:00 (13:30 on Mondays), VVSW
+before 13:50 on VVSW days. If the next VVP and VVSW meetings are within about 30 minutes
+of each other (Monday 13:30 vs. 13:50), or both have already happened today, ask which
+one they mean.
+
 ## Cross-reference with GitHub PRs (source of truth for completion)
 
 Jira status can lag behind reality (a ticket left "Selected for Development" or "IN
