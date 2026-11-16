@@ -130,6 +130,9 @@ gh search prs --author=eforgacs-rideflux --owner=RideFlux --sort=updated \
   --json number,title,repository,state,closedAt,url --limit 100
 ```
 
+`standup.py` (below) runs this and applies the rules in this section for you. They're
+kept here as the spec it follows.
+
 - PR titles in this org are consistently prefixed with the Jira key (e.g. `[VV-3018]
   ...`), so match on that to pair each PR with its ticket.
 - `state` is one of `open`, `merged`, or `closed` (closed without merging — check
@@ -150,27 +153,44 @@ gh search prs --author=eforgacs-rideflux --owner=RideFlux --sort=updated \
 - Not every ticket will have a matching PR (e.g. Notion/investigation-only tickets) —
   that's fine, just fall back to the Jira status for those.
 
-## How to get the Jira data
+## How to get the data: `standup.py`
 
-Use `jira_standup.py` with a custom JQL cutoff so the window matches the actual last
-meeting time, not just a calendar day count:
+`standup.py` does the mechanical steps above in one run. It computes the cutoff
+(skipping holidays), fetches Jira and `gh` data, matches status against PRs, applies the
+VVP/VVSW split and drops noise:
 
 ```bash
 if [ -f ~/.jira_env ]; then source ~/.jira_env; fi
 export JIRA_EMAIL="${JIRA_ID}"
 export JIRA_API_TOKEN="${JIRA_TOKEN}"
 export JIRA_BASE_URL="https://rideflux.atlassian.net"
-export JIRA_JQL='assignee = currentUser() AND updated >= "YYYY-MM-DD HH:MM" ORDER BY updated DESC'
-.venv/bin/python jira_standup.py
+.venv/bin/python standup.py --meeting vvsw   # or --meeting vvp
 ```
 
-- The cutoff is always **1:50 PM KST** on the previous meeting day (see Schedule above
-  for how to derive that day from today's weekday) — no need to ask the user.
-- `--days N` also works for a rough day-granularity window, but prefer the explicit
-  timestamp JQL above for accuracy, especially around weekends (Monday's cutoff is the
-  prior Thursday, not "1 day ago").
-- `jira_table.py --update-doc` pushes a markdown table to the configured Google Doc
-  (Saturday cron job) — this is a separate, less relevant flow. Don't use it unless
+- Options: `--format daily|weekly` (VVSW; required on Fridays), `--day-off YYYY-MM-DD`
+  (repeatable, for team days off the user mentions), `--today YYYY-MM-DD` (pretend
+  date), `--json` (machine-readable output).
+- Output sections: the requested meeting's tickets, **Ambiguous** (ask the user),
+  **Excluded** (the other meeting's tickets, with the classification reason), and
+  **Dropped**.
+- Each ticket line already shows the reconciled status (`[DONE]` if a PR merged), so use
+  it as-is in the bullet list. Under it are the Jira status, PRs, merges since the
+  cutoff, new commits, and **other people's PR feedback since the cutoff**. Read the
+  feedback: a reviewer questioning the approach is worth raising in the update or with
+  the user.
+- Tickets marked `pulled in by PR activity` have no Jira update since the cutoff but
+  had PR activity (commits, comments, merge). A JQL-only query would miss them.
+- **Dropped** lists Epics and tickets whose only changes since the cutoff are release
+  automation (moved to `Release`) or no-ops (`DONE → DONE`). It's listed so you can
+  spot-check it, not to report.
+- `FLAG:` lines (e.g. a PR closed without merging) mean ask the user. See the rules
+  above.
+- Not covered by the script: the Thursday Notion dedupe and the Slack reminder thread.
+  Do those by hand as described above.
+- Tests: `.venv/bin/python -m unittest test_standup`.
+- `jira_standup.py` (plain JQL listing) still works for ad-hoc queries.
+  `jira_table.py --update-doc` pushes a markdown table to the configured Google Doc
+  (Saturday cron job). That's a separate, less relevant flow; don't use it unless
   asked.
 
 ## Output format (every update, daily or weekly)
