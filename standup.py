@@ -25,6 +25,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
 
@@ -52,6 +53,7 @@ VVP_TEXT_RE = re.compile(r"\[RF-VVP\]|VVP")
 JIRA_KEY_RE = re.compile(r"\b(VV-\d+)\b")
 
 RELEASE_STATUS = "Release"
+SNAPSHOT_DIR = Path(__file__).resolve().parent / "weekly_snapshots"
 FEEDBACK_MAX_CHARS = 300
 # Codex posts a summary comment and a review "receipt" around its line comments;
 # only the line comments carry findings.
@@ -132,6 +134,7 @@ class Ticket:
     category: str = ""
     category_reason: str = ""
     flags: List[str] = field(default_factory=list)
+    since_weekly: Optional[List[str]] = None  # changes since the Wednesday weekly reported it
 
 
 # --------------------------------------------------------------------------- rules
@@ -361,7 +364,71 @@ def build_bundle(meeting: str, cutoff: datetime, me: str) -> Dict:
         )
         kept.append(t)
 
-    return {"tickets": kept, "dropped": dropped}
+    return {"tickets": kept, "dropped": dropped, "covered": []}
+
+
+# --------------------------------------------------------------------------- weekly snapshot
+
+def weekly_between(cutoff: datetime, today: date, days_off: Set[date]) -> Optional[date]:
+    """The Wednesday weekly held after the cutoff and before today, if any."""
+    d = today - timedelta(days=1)
+    while d > cutoff.date():
+        if d.weekday() == 2 and not is_day_off(d, days_off):
+            return d
+        d -= timedelta(days=1)
+    return None
+
+
+def snapshot_path(wednesday: date, directory: Path = SNAPSHOT_DIR) -> Path:
+    return directory / f"{wednesday.isoformat()}.json"
+
+
+def save_weekly_snapshot(wednesday: date, tickets: List[Ticket], directory: Path = SNAPSHOT_DIR) -> Path:
+    path = snapshot_path(wednesday, directory)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "date": wednesday.isoformat(),
+        "saved_at": datetime.now(KST).isoformat(timespec="seconds"),
+        "tickets": {
+            t.key: {"summary": t.summary, "status": t.status, "prs": {p.ref: p.state for p in t.prs}}
+            for t in tickets
+        },
+    }
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    return path
+
+
+def load_weekly_snapshot(wednesday: date, directory: Path = SNAPSHOT_DIR) -> Optional[Dict]:
+    path = snapshot_path(wednesday, directory)
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def changes_since_weekly(t: Ticket, entry: Dict) -> List[str]:
+    """What moved since the weekly: status change, or a PR that is new or changed state."""
+    changes = []
+    if t.status != entry["status"]:
+        changes.append(f"status {entry['status']} → {t.status}")
+    for p in t.prs:
+        old = entry["prs"].get(p.ref)
+        if old is None:
+            changes.append(f"{p.ref} new ({p.state})")
+        elif old != p.state:
+            changes.append(f"{p.ref} {old} → {p.state}")
+    return changes
+
+
+def apply_weekly_dedupe(bundle: Dict, snapshot: Dict) -> None:
+    """Move VVSW tickets the weekly already reported, unchanged since, into bundle["covered"]."""
+    reported = snapshot["tickets"]
+    kept = []
+    for t in bundle["tickets"]:
+        entry = reported.get(t.key)
+        if t.category != "vvsw" or entry is None:
+            kept.append(t)
+            continue
+        t.since_weekly = changes_since_weekly(t, entry)
+        (kept if t.since_weekly else bundle["covered"]).append(t)
+    bundle["tickets"] = kept
 
 
 # --------------------------------------------------------------------------- output
@@ -398,17 +465,20 @@ def render_ticket(t: Ticket, cutoff: datetime) -> List[str]:
             lines.append(f"    {p.ref} feedback: {fb}")
     for flag in t.flags:
         lines.append(f"    FLAG: {flag}")
+    if t.since_weekly:
+        lines.append(f"    in Wednesday weekly; since then: {'; '.join(t.since_weekly)}")
     return lines
 
 
 def render_text(meeting: str, fmt: Optional[str], today: date, cutoff: datetime,
-                warnings: List[str], bundle: Dict) -> str:
+                warnings: List[str], notes: List[str], bundle: Dict) -> str:
     label = "VVP daily" if meeting == "vvp" else f"VVSW {fmt}"
     out = [
         f"Meeting: {label} ({today:%a %Y-%m-%d})",
         f"Cutoff:  {cutoff:%a %Y-%m-%d %H:%M} KST",
     ]
     out += [f"WARNING: {w}" for w in warnings]
+    out += [f"Note: {n}" for n in notes]
 
     other = "vvsw" if meeting == "vvp" else "vvp"
     groups = {c: [t for t in bundle["tickets"] if t.category == c] for c in ("vvp", "vvsw", "ambiguous")}
@@ -420,6 +490,9 @@ def render_text(meeting: str, fmt: Optional[str], today: date, cutoff: datetime,
         out += ["", f"== Ambiguous: ask the user ({len(groups['ambiguous'])}) =="]
         for t in groups["ambiguous"]:
             out += render_ticket(t, cutoff) + [f"    reason: {t.category_reason}"]
+    if bundle["covered"]:
+        out += ["", f"== Covered by Wednesday weekly, unchanged: don't report ({len(bundle['covered'])}) =="]
+        out += [f"- {t.key}: {t.summary} [{t.status}]" for t in bundle["covered"]]
     out += ["", f"== Excluded: {other.upper()} work ({len(groups[other])}) =="]
     out += [f"- {t.key}: {t.summary} ({t.category_reason})" for t in groups[other]]
     out += ["", f"== Dropped ({len(bundle['dropped'])}) =="]
@@ -458,6 +531,22 @@ def main() -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
+    notes = []
+    if args.meeting == "vvsw" and fmt == "weekly" and today.weekday() == 2 and not args.today:
+        vvsw = [t for t in bundle["tickets"] if t.category == "vvsw"]
+        notes.append(f"Saved weekly snapshot: {save_weekly_snapshot(today, vvsw)}")
+    elif args.meeting == "vvsw" and fmt == "daily":
+        wednesday = weekly_between(cutoff, today, days_off)
+        if wednesday:
+            snapshot = load_weekly_snapshot(wednesday)
+            if snapshot:
+                apply_weekly_dedupe(bundle, snapshot)
+                notes.append(f"Deduped against weekly snapshot {snapshot_path(wednesday).name}")
+            else:
+                warnings.append(
+                    f"no weekly snapshot for {wednesday}: check the Notion entry by hand (see CLAUDE.md)"
+                )
+
     if args.json:
         print(json.dumps({
             "meeting": args.meeting,
@@ -465,11 +554,13 @@ def main() -> int:
             "today": today.isoformat(),
             "cutoff": cutoff.isoformat(),
             "warnings": warnings,
+            "notes": notes,
             "tickets": [ticket_to_dict(t, cutoff) for t in bundle["tickets"]],
+            "covered_by_weekly": [{"key": t.key, "status": t.status} for t in bundle["covered"]],
             "dropped": [{"key": t.key, "jira_status": t.jira_status, "reason": r} for t, r in bundle["dropped"]],
         }, ensure_ascii=False, indent=2))
     else:
-        print(render_text(args.meeting, fmt, today, cutoff, warnings, bundle))
+        print(render_text(args.meeting, fmt, today, cutoff, warnings, notes, bundle))
     return 0
 
 

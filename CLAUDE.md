@@ -30,6 +30,18 @@ depending on the day of the week — always check which one applies before gener
 Thursday's JQL window still starts at Tuesday 1:50 PM KST. That window overlaps with the
 Wednesday weekly, so anything already reported there shouldn't be repeated on Thursday.
 
+**`standup.py` handles this automatically.** Every Wednesday weekly run saves a snapshot
+of the reported tickets to `weekly_snapshots/YYYY-MM-DD.json` (gitignored, local only).
+The next VVSW daily whose window includes that Wednesday applies rules 2–4 below:
+- Unchanged tickets move to a "Covered by Wednesday weekly" section. Don't report them.
+- Tickets that moved get an `in Wednesday weekly; since then: …` line. Report only that
+  new progress.
+
+The snapshot is the last Wednesday run, not the Notion entry itself. If the user edited
+the Notion entry by hand, or asks whether it matches, check Notion. Fall back to the
+manual steps below only when the script warns `no weekly snapshot` (e.g. the weekly was
+generated without the script, or on another machine):
+
 1. Read the user's Wednesday entry on the Notion page **VVSW 주간회의**
    (https://app.notion.com/p/rideflux/VVSW-26a7b7808474800e8e2be31f02399d2a).
    - The page is huge (300k+ chars), so `notion-fetch` dumps it to a file. Read the
@@ -185,8 +197,10 @@ export JIRA_BASE_URL="https://rideflux.atlassian.net"
   spot-check it, not to report.
 - `FLAG:` lines (e.g. a PR closed without merging) mean ask the user. See the rules
   above.
-- Not covered by the script: the Thursday Notion dedupe and the Slack reminder thread.
-  Do those by hand as described above.
+- On Wednesdays (real date, no `--today`), the weekly run saves the snapshot used by
+  Thursday's dedupe. See the Thursday section above.
+- Not covered by the script: the Slack reminder thread. Do that by hand as described
+  above.
 - Tests: `.venv/bin/python -m unittest test_standup`.
 - `jira_standup.py` (plain JQL listing) still works for ad-hoc queries.
   `jira_table.py --update-doc` pushes a markdown table to the configured Google Doc
@@ -278,7 +292,8 @@ instead of having the user copy-paste it:
   `librf_rti.so`) in backticks, or Notion auto-links them (which also breaks later
   `old_str` matches).
 - Tickets/PRs keep moving right up to the meeting. If the user asks for a refresh, re-run
-  the Jira + `gh` queries and patch only the changed lines with targeted
+  `standup.py` (this also overwrites the Wednesday snapshot, keeping it in sync with what
+  was posted) and patch only the changed lines with targeted
   `update_content` (include the next bullet's key in `old_str` — last week's entry often
   has identical lines).
 - Don't post the spoken update (Korean/English) — that stays in the terminal for the
