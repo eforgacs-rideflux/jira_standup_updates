@@ -1,8 +1,12 @@
+import tempfile
 import unittest
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 from standup import (
-    KST, PR, classify, compute_cutoff, effective_status, has_pr_activity, is_release_noise, one_line,
+    KST, PR, Ticket, apply_weekly_dedupe, changes_since_weekly, classify, compute_cutoff,
+    effective_status, has_pr_activity, is_release_noise, load_weekly_snapshot, one_line,
+    save_weekly_snapshot, weekly_between,
 )
 
 
@@ -10,10 +14,16 @@ def kst(y, m, d, hh, mm):
     return datetime(y, m, d, hh, mm, tzinfo=KST)
 
 
-def pr(state="open", repo="RideFluxSW", closed_at=None, commits=(), feedback=()):
-    return PR(repo=repo, number=1, title="[VV-1] x", state=state, url="", keys=["VV-1"],
+def pr(state="open", repo="RideFluxSW", closed_at=None, commits=(), feedback=(), number=1):
+    return PR(repo=repo, number=number, title="[VV-1] x", state=state, url="", keys=["VV-1"],
               updated_at=datetime(2026, 11, 16, tzinfo=timezone.utc), closed_at=closed_at,
               commits_since=list(commits), feedback=list(feedback))
+
+
+def ticket(key, status="IN PROGRESS", prs=(), category="vvsw"):
+    return Ticket(key=key, summary=key, jira_status=status, jira_done=False, issue_type="Task",
+                  parent_key=None, parent_summary=None, histories=[], prs=list(prs),
+                  status=status, category=category)
 
 
 def history(created, *items):
@@ -146,6 +156,55 @@ class OneLineTest(unittest.TestCase):
 
     def test_truncates(self):
         self.assertEqual(len(one_line("a" * 500, limit=10)), 10)
+
+
+class WeeklySnapshotTest(unittest.TestCase):
+    def test_weekly_between_thursday(self):
+        self.assertEqual(weekly_between(kst(2026, 11, 17, 13, 50), date(2026, 11, 19), set()), date(2026, 11, 18))
+
+    def test_weekly_between_none_on_tuesday(self):
+        self.assertIsNone(weekly_between(kst(2026, 11, 16, 13, 50), date(2026, 11, 17), set()))
+
+    def test_weekly_between_skips_day_off(self):
+        self.assertIsNone(weekly_between(kst(2026, 11, 17, 13, 50), date(2026, 11, 19), {date(2026, 11, 18)}))
+
+    def test_weekly_between_monday_after_thursday_off(self):
+        # Thursday 11-19 off, so Monday's cutoff is Tuesday 11-17 and the weekly falls inside.
+        cutoff, _ = compute_cutoff("vvsw", date(2026, 11, 23), None, {date(2026, 11, 19)})
+        self.assertEqual(weekly_between(cutoff, date(2026, 11, 23), {date(2026, 11, 19)}), date(2026, 11, 18))
+
+    def test_save_and_load_roundtrip(self):
+        with tempfile.TemporaryDirectory() as d:
+            save_weekly_snapshot(date(2026, 11, 18), [ticket("VV-1", prs=[pr("open")])], Path(d))
+            snap = load_weekly_snapshot(date(2026, 11, 18), Path(d))
+            self.assertEqual(snap["tickets"]["VV-1"], {"summary": "VV-1", "status": "IN PROGRESS",
+                                                       "prs": {"RideFluxSW#1": "open"}})
+            self.assertIsNone(load_weekly_snapshot(date(2026, 11, 11), Path(d)))
+
+    def test_changes_since_weekly(self):
+        entry = {"status": "IN PROGRESS", "prs": {"RideFluxSW#1": "open"}}
+        self.assertEqual(changes_since_weekly(ticket("VV-1", prs=[pr("open")]), entry), [])
+        self.assertEqual(changes_since_weekly(ticket("VV-1", "DONE", prs=[pr("merged")]), entry),
+                         ["status IN PROGRESS → DONE", "RideFluxSW#1 open → merged"])
+        self.assertEqual(changes_since_weekly(ticket("VV-1", prs=[pr("open"), pr("open", number=2)]), entry),
+                         ["RideFluxSW#2 new (open)"])
+
+    def test_apply_weekly_dedupe(self):
+        unchanged = ticket("VV-1", prs=[pr("open")])
+        moved = ticket("VV-2", "DONE", prs=[pr("merged", number=2)])
+        new = ticket("VV-3")
+        vvp = ticket("VV-4", category="vvp")
+        snapshot = {"tickets": {
+            "VV-1": {"status": "IN PROGRESS", "prs": {"RideFluxSW#1": "open"}},
+            "VV-2": {"status": "IN PROGRESS", "prs": {"RideFluxSW#2": "open"}},
+            "VV-4": {"status": "IN PROGRESS", "prs": {}},
+        }}
+        bundle = {"tickets": [unchanged, moved, new, vvp], "covered": []}
+        apply_weekly_dedupe(bundle, snapshot)
+        self.assertEqual([t.key for t in bundle["tickets"]], ["VV-2", "VV-3", "VV-4"])
+        self.assertEqual([t.key for t in bundle["covered"]], ["VV-1"])
+        self.assertEqual(moved.since_weekly, ["status IN PROGRESS → DONE", "RideFluxSW#2 open → merged"])
+        self.assertIsNone(new.since_weekly)
 
 
 if __name__ == "__main__":
