@@ -5,7 +5,7 @@ from pathlib import Path
 
 from standup import (
     KST, PR, Ticket, apply_weekly_dedupe, changes_since_weekly, classify, compute_cutoff,
-    effective_status, has_pr_activity, is_release_noise, load_weekly_snapshot, one_line,
+    drop_reason, effective_status, find_bulk_transitions, has_pr_activity, load_weekly_snapshot, one_line,
     save_weekly_snapshot, weekly_between,
 )
 
@@ -26,8 +26,8 @@ def ticket(key, status="IN PROGRESS", prs=(), category="vvsw"):
                   status=status, category=category)
 
 
-def history(created, *items):
-    return {"created": created, "items": [dict(i) for i in items]}
+def history(created, *items, author="me"):
+    return {"created": created, "author": {"accountId": author}, "items": [dict(i) for i in items]}
 
 
 class CutoffTest(unittest.TestCase):
@@ -110,28 +110,85 @@ class StatusTest(unittest.TestCase):
 
 class NoiseTest(unittest.TestCase):
     cutoff = kst(2026, 11, 12, 13, 50)
-    to_release = {"field": "status", "fromString": "DONE", "toString": "Release"}
-    noop = {"field": "status", "fromString": "DONE", "toString": "DONE"}
-    real = {"field": "status", "fromString": "IN PROGRESS", "toString": "DONE"}
+    to_release = {"field": "status", "fromString": "DONE", "toString": "Release", "to": "20"}
+    noop = {"field": "status", "fromString": "DONE", "toString": "DONE", "to": "10"}
+    real = {"field": "status", "fromString": "IN PROGRESS", "toString": "DONE", "to": "10"}
+    cancel = {"field": "status", "fromString": "Selected for Development", "toString": "Canceled", "to": "30"}
+    done_ids = {"10", "20", "30"}
 
     def test_release_only_is_noise(self):
         hs = [history("2026-11-13T00:28:19.174+0900", self.to_release),
               history("2026-11-12T11:13:00.038+0900", self.real)]  # before cutoff, ignored
-        self.assertTrue(is_release_noise(hs, self.cutoff, False))
+        self.assertEqual(drop_reason(hs, self.cutoff, False), "release automation / no-op changes only")
 
     def test_noop_is_noise(self):
-        self.assertTrue(is_release_noise([history("2026-11-13T14:48:38+0900", self.noop)], self.cutoff, False))
+        self.assertIsNotNone(drop_reason([history("2026-11-13T14:48:38+0900", self.noop)], self.cutoff, False))
 
     def test_real_change_is_kept(self):
         hs = [history("2026-11-13T00:28:19+0900", self.to_release), history("2026-11-13T07:29:06+0900", self.real)]
-        self.assertFalse(is_release_noise(hs, self.cutoff, False))
+        self.assertIsNone(drop_reason(hs, self.cutoff, False))
 
     def test_pr_activity_keeps_ticket(self):
-        self.assertFalse(is_release_noise([history("2026-11-13T00:28:19+0900", self.to_release)], self.cutoff, True))
+        self.assertIsNone(drop_reason([history("2026-11-13T00:28:19+0900", self.to_release)], self.cutoff, True))
 
     def test_no_recent_history_is_kept(self):
         # e.g. updated by a comment only
-        self.assertFalse(is_release_noise([history("2026-11-01T00:00:00+0900", self.real)], self.cutoff, False))
+        self.assertIsNone(drop_reason([history("2026-11-01T00:00:00+0900", self.real)], self.cutoff, False))
+
+    def bulk(self, n, item, created="2026-11-13T16:16:05.1+0900", author="me"):
+        return [[history(created, item, author=author)] for _ in range(n)]
+
+    def bulk_refs(self, tickets):
+        return find_bulk_transitions(tickets, self.cutoff, self.done_ids)
+
+    def test_bulk_needs_enough_tickets(self):
+        self.assertEqual(self.bulk_refs(self.bulk(5, self.cancel)), {("me", "2026-11-13T16:16:05.1+0900")})
+        self.assertEqual(self.bulk_refs(self.bulk(4, self.cancel)), set())
+
+    def test_bulk_spans_minute_boundary_and_mixed_done_statuses(self):
+        # The real 2026-11-11 cleanup: 16:15:55-16:16:00, some to DONE and some to Canceled.
+        tickets = (self.bulk(2, self.real, created="2026-11-13T16:15:55+0900")
+                   + self.bulk(3, self.cancel, created="2026-11-13T16:16:00+0900"))
+        self.assertEqual(len(self.bulk_refs(tickets)), 2)
+
+    def test_bulk_split_by_author_and_window(self):
+        tickets = (self.bulk(3, self.cancel) + self.bulk(3, self.cancel, author="other")
+                   + self.bulk(2, self.cancel, created="2026-11-13T16:20:00+0900"))
+        self.assertEqual(self.bulk_refs(tickets), set())
+
+    def test_bulk_counts_distinct_tickets(self):
+        one_ticket = [[history(f"2026-11-13T16:16:0{i}+0900", self.cancel) for i in range(6)]]
+        self.assertEqual(self.bulk_refs(one_ticket), set())
+
+    def test_bulk_ignores_non_done_and_old_changes(self):
+        backlog = {"field": "status", "fromString": "IN PROGRESS", "toString": "Backlog", "to": "1"}
+        self.assertEqual(self.bulk_refs(self.bulk(6, backlog)), set())
+        self.assertEqual(self.bulk_refs(self.bulk(6, self.cancel, created="2026-11-01T10:00:00+0900")), set())
+
+    def test_bulk_cleanup_is_dropped(self):
+        tickets = self.bulk(5, self.cancel)
+        refs = self.bulk_refs(tickets)
+        self.assertEqual(drop_reason(tickets[0], self.cutoff, False, self.done_ids, refs), "bulk status cleanup")
+
+    def test_bulk_plus_release_noise_is_dropped(self):
+        tickets = self.bulk(5, self.cancel)
+        refs = self.bulk_refs(tickets)
+        hs = tickets[0] + [history("2026-11-14T00:00:00+0900", self.to_release)]
+        self.assertEqual(drop_reason(hs, self.cutoff, False, self.done_ids, refs), "bulk status cleanup")
+
+    def test_single_close_is_kept(self):
+        tickets = self.bulk(1, self.real)
+        self.assertIsNone(drop_reason(tickets[0], self.cutoff, False, self.done_ids, self.bulk_refs(tickets)))
+
+    def test_bulk_with_other_real_change_is_kept(self):
+        tickets = self.bulk(5, self.cancel)
+        assigned = {"field": "assignee", "fromString": None, "toString": "에디"}
+        hs = tickets[0] + [history("2026-11-14T00:00:00+0900", assigned)]
+        self.assertIsNone(drop_reason(hs, self.cutoff, False, self.done_ids, self.bulk_refs(tickets)))
+
+    def test_bulk_with_pr_activity_is_kept(self):
+        tickets = self.bulk(5, self.cancel)
+        self.assertIsNone(drop_reason(tickets[0], self.cutoff, True, self.done_ids, self.bulk_refs(tickets)))
 
 
 class PrActivityTest(unittest.TestCase):

@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -53,6 +54,11 @@ VVP_TEXT_RE = re.compile(r"\[RF-VVP\]|VVP")
 JIRA_KEY_RE = re.compile(r"\b(VV-\d+)\b")
 
 RELEASE_STATUS = "Release"
+# This many tickets moved to a done-category status by the same person within
+# BULK_WINDOW of each other is a bulk cleanup (e.g. closing out stale tickets), not
+# progress to report.
+BULK_MIN_TICKETS = 5
+BULK_WINDOW = timedelta(seconds=60)
 SNAPSHOT_DIR = Path(__file__).resolve().parent / "weekly_snapshots"
 FEEDBACK_MAX_CHARS = 300
 # Codex posts a summary comment and a review "receipt" around its line comments;
@@ -178,14 +184,53 @@ def is_noise_change(item: Dict) -> bool:
     return item.get("fromString") == item.get("toString")
 
 
-def is_release_noise(histories: List[Dict], cutoff: datetime, has_pr_activity: bool) -> bool:
-    """True if every changelog entry since the cutoff is release-automation noise."""
+def is_noise_history(h: Dict) -> bool:
+    return all(is_noise_change(item) for item in h.get("items", []))
+
+
+def done_transition(h: Dict, done_status_ids: Set[str]) -> Optional[Tuple[str, str]]:
+    """(author, created) if this history moves the ticket to a done-category status."""
+    for item in h.get("items", []):
+        if item.get("field") == "status" and item.get("to") in done_status_ids:
+            return (h.get("author") or {}).get("accountId", ""), h["created"]
+    return None
+
+
+def find_bulk_transitions(
+    histories_per_ticket: Iterable[List[Dict]], cutoff: datetime, done_status_ids: Set[str],
+    min_tickets: int = BULK_MIN_TICKETS, window: timedelta = BULK_WINDOW,
+) -> Set[Tuple[str, str]]:
+    """Done-transitions made as part of a bulk cleanup, as (author, created) pairs."""
+    events = []  # (author, time, ticket index, (author, created))
+    for i, histories in enumerate(histories_per_ticket):
+        for h in histories:
+            when = parse_dt(h["created"])
+            ref = done_transition(h, done_status_ids)
+            if ref and when >= cutoff:
+                events.append((ref[0], when, i, ref))
+    bulk = set()
+    for author, when, _, ref in events:
+        nearby = {i for a, w, i, _ in events if a == author and abs(w - when) <= window}
+        if len(nearby) >= min_tickets:
+            bulk.add(ref)
+    return bulk
+
+
+def drop_reason(
+    histories: List[Dict], cutoff: datetime, has_pr_activity: bool,
+    done_status_ids: Set[str] = frozenset(), bulk_transitions: Set[Tuple[str, str]] = frozenset(),
+) -> Optional[str]:
+    """Why a ticket's changes since the cutoff aren't worth reporting, or None to keep it."""
     if has_pr_activity:
-        return False
+        return None
     recent = [h for h in histories if parse_dt(h["created"]) >= cutoff]
     if not recent:
-        return False
-    return all(is_noise_change(item) for h in recent for item in h.get("items", []))
+        return None
+    if all(is_noise_history(h) for h in recent):
+        return "release automation / no-op changes only"
+    if all(is_noise_history(h) or done_transition(h, done_status_ids) in bulk_transitions for h in recent):
+        return "bulk status cleanup"
+    return None
 
 
 def has_pr_activity(pr: PR, cutoff: datetime) -> bool:
@@ -292,6 +337,12 @@ def jira_session() -> Tuple[requests.Session, str]:
     return session, base_url
 
 
+def fetch_done_status_ids(session: requests.Session, base_url: str) -> Set[str]:
+    r = session.get(f"{base_url}/rest/api/3/status", timeout=30)
+    r.raise_for_status()
+    return {s["id"] for s in r.json() if (s.get("statusCategory") or {}).get("key") == "done"}
+
+
 def fetch_tickets(session: requests.Session, base_url: str, jql: str, source: str) -> List[Ticket]:
     issues = jira_search_jql(
         session, base_url, jql,
@@ -343,6 +394,9 @@ def build_bundle(meeting: str, cutoff: datetime, me: str) -> Dict:
     if github_only:
         tickets += fetch_tickets(session, base_url, f"key in ({', '.join(github_only)})", source="github")
 
+    done_status_ids = fetch_done_status_ids(session, base_url)
+    bulk_transitions = find_bulk_transitions((t.histories for t in tickets), cutoff, done_status_ids)
+
     prs_by_key: Dict[str, List[PR]] = {}
     for p in prs:
         for k in p.keys:
@@ -355,8 +409,9 @@ def build_bundle(meeting: str, cutoff: datetime, me: str) -> Dict:
         if t.issue_type == "Epic":
             dropped.append((t, "epic"))
             continue
-        if is_release_noise(t.histories, cutoff, activity):
-            dropped.append((t, "release automation / no-op changes only"))
+        reason = drop_reason(t.histories, cutoff, activity, done_status_ids, bulk_transitions)
+        if reason:
+            dropped.append((t, reason))
             continue
         t.status, t.flags = effective_status(t.jira_status, t.jira_done, t.prs)
         t.category, t.category_reason = classify(
