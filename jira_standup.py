@@ -39,6 +39,7 @@ def jira_search_jql(
     jql: str,
     fields: List[str],
     page_size: int = 100,
+    expand: Optional[str] = None,
 ) -> List[Dict]:
     """Uses POST /rest/api/3/search/jql with nextPageToken pagination."""
     endpoint = f"{base_url}/rest/api/3/search/jql"
@@ -51,6 +52,8 @@ def jira_search_jql(
             "fields": fields,
             "maxResults": page_size,
         }
+        if expand:
+            payload["expand"] = expand
         if next_token:
             payload["nextPageToken"] = next_token
 
