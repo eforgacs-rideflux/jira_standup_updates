@@ -193,8 +193,11 @@ export JIRA_BASE_URL="https://rideflux.atlassian.net"
 - Tickets marked `pulled in by PR activity` have no Jira update since the cutoff but
   had PR activity (commits, comments, merge). A JQL-only query would miss them.
 - **Dropped** lists Epics and tickets whose only changes since the cutoff are release
-  automation (moved to `Release`) or no-ops (`DONE → DONE`). It's listed so you can
-  spot-check it, not to report.
+  automation (moved to `Release`), no-ops (`DONE → DONE`), or a **bulk status cleanup**.
+  A cleanup is the same person moving 5+ tickets to a done-category status (`DONE`,
+  `Canceled`, …) within 60 seconds, like the user closing out stale tickets. A single
+  ticket closed by hand is still reported, and so is anything with PR activity. It's
+  listed so you can spot-check it, not to report.
 - `FLAG:` lines (e.g. a PR closed without merging) mean ask the user. See the rules
   above.
 - On Wednesdays (real date, no `--today`), the weekly run saves the snapshot used by
