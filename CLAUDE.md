@@ -206,9 +206,10 @@ export JIRA_BASE_URL="https://rideflux.atlassian.net"
   above.
 - Tests: `.venv/bin/python -m unittest test_standup`.
 - `jira_standup.py` (plain JQL listing) still works for ad-hoc queries.
-  `jira_table.py --update-doc` pushes a markdown table to the configured Google Doc
-  (Saturday cron job). That's a separate, less relevant flow; don't use it unless
-  asked.
+  `jira_table.py --update-doc` pushes a markdown table to the configured Google Doc.
+  That's a separate, less relevant flow; don't use it unless asked. There are no cron
+  jobs anymore (the daily/weekly wrappers were removed in VV-2942 after failing
+  silently for months).
 
 ## Output format (every update, daily or weekly)
 

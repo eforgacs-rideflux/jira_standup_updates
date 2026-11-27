@@ -1,60 +1,30 @@
-# Jira Standup & Weekly Report Scripts
+# Jira Standup Scripts
 
-Scripts for fetching Jira tickets and generating standup summaries or weekly work log updates.
+Scripts that collect Jira/GitHub activity for VVSW/VVP standup updates. The spoken
+update itself is written in a Claude Code session following `CLAUDE.md`. Nothing runs on
+cron.
 
 ## Files
 
-- **`jira_last_week.py`** - Main Python script that fetches Jira tickets, outputs a markdown table or standup summary
-- **`weekly_jira_update.sh`** - Wrapper script for the weekly cron job
-- **`weekly_update.log`** - Log file for automated runs
+- **`standup.py`**: main entry point. Builds the data bundle for a standup update
+  (cutoff, Jira + `gh` activity, VVP/VVSW split, noise filtering). See `CLAUDE.md`.
+- **`test_standup.py`**: tests for `standup.py` (`.venv/bin/python -m unittest test_standup`).
+- **`jira_standup.py`**: plain JQL listing (`- KEY: summary [STATUS]`) for ad-hoc
+  queries. `standup.py` also imports its Jira search helper.
+- **`jira_table.py`**: markdown table + CSV of recent tickets, with an optional
+  `--update-doc` Google Doc append (needs the Google API client libraries, which aren't
+  in `.venv`).
 
 ## Usage
 
-### Daily Standup Summary (≤5 sentences, via Claude)
-
 ```bash
-python3 jira_last_week.py --standup
-# Defaults to --days 1. Override with e.g. --days 2
+if [ -f ~/.jira_env ]; then source ~/.jira_env; fi
+export JIRA_EMAIL="${JIRA_ID}"
+export JIRA_API_TOKEN="${JIRA_TOKEN}"
+export JIRA_BASE_URL="https://rideflux.atlassian.net"
+
+.venv/bin/python standup.py --meeting vvsw     # or --meeting vvp
+.venv/bin/python jira_standup.py --days 7      # ad-hoc listing
 ```
 
-### Weekly Markdown Table
-
-```bash
-python3 jira_last_week.py --days 7
-```
-
-### Update Google Doc
-
-```bash
-~/scripts/jira/weekly_jira_update.sh
-# or:
-python3 jira_last_week.py --update-doc
-```
-
-## Schedule
-
-Weekly cron runs automatically every **Saturday at 9:00 AM** via `weekly_jira_update.sh`.
-
-## Configuration
-
-All secrets go in `~/.jira_env` (sourced by the wrapper script and compatible with cron):
-
-```bash
-export JIRA_ID="you@your-org.com"
-export JIRA_TOKEN="your-jira-api-token"
-export JIRA_BASE_URL="https://your-org.atlassian.net"
-export GOOGLE_DOC_ID="your-google-doc-id"          # from the doc URL: /document/d/<ID>/edit
-export ANTHROPIC_API_KEY="your-anthropic-api-key"   # required for --standup
-export VENV_PYTHON="/path/to/venv/bin/python"        # optional, falls back to system python3
-```
-
-### Google OAuth
-
-Place your OAuth credentials at `~/.google_credentials.json`. A cached token will be saved to `~/.google_token.json` after first authorization.
-
-## Check Status
-
-```bash
-cat ~/scripts/jira/weekly_update.log
-crontab -l
-```
+Use `.venv/bin/python`. The system `python3` doesn't have `requests`/`holidays`.
